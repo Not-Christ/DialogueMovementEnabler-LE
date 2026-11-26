@@ -1,6 +1,6 @@
 # Dialogue Movement Enabler LE
 
-Backport of Vermunds' [Dialogue Movement Enabler SE](https://github.com/Vermunds/DialogueMovementEnabler-SE) (v2.4.0) to **The Elder Scrolls V: Skyrim — Legendary Edition (1.9.32.0 / SKSE 1.7.3)** using **CommonLibLE** with LE 1.9.32.0 UI/Input/Dialogue layouts cross-verified against `libSkyrim` and `skyrim-classic-re`.
+Backport of Vermunds' [Dialogue Movement Enabler SE](https://github.com/Vermunds/DialogueMovementEnabler-SE) (v2.4.0) to **The Elder Scrolls V: Skyrim — Legendary Edition (1.9.32.0 / SKSE 1.7.3)** using **CommonLibLE** with LE 1.9.32.0. Cross-verified against `libSkyrim` and `skyrim-classic-re`.
 
 ## Building (Windows Win32 / x86)
 Requires **Visual Studio 2022** (with Desktop Development with C++ / Win32 x86 toolset `v143`) and **CommonLibLE** (`../CommonLibLE_MASTER_FULL_PROJECT_AUDITED_V0_9_5_2026-08-04/SDK_SOURCE`).
