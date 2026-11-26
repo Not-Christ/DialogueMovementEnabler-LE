@@ -1,0 +1,16 @@
+#pragma once
+
+#include <cstddef>
+#include <string_view>
+
+namespace Version
+{
+	inline constexpr std::size_t MAJOR = @PROJECT_VERSION_MAJOR@;
+	inline constexpr std::size_t MINOR = @PROJECT_VERSION_MINOR@;
+	inline constexpr std::size_t PATCH = @PROJECT_VERSION_PATCH@;
+
+	inline constexpr std::string_view STRING = "@PROJECT_VERSION@";
+	inline constexpr std::string_view NAME = "@PROJECT_NAME@";
+	inline constexpr std::string_view FORMATTED_NAME = "@FORMATTED_NAME@";
+	inline constexpr std::string_view AUTHOR = "@AUTHOR@";
+}

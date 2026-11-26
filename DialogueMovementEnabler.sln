@@ -1,0 +1,27 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CommonLibLE", "..\CommonLibLE_MASTER_FULL_PROJECT_AUDITED_V0_9_5_2026-08-04\SDK_SOURCE\CommonLibLE.vcxproj", "{718AA137-8391-4A35-AE13-A78746F5A5E8}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DialogueMovementEnabler", "DialogueMovementEnabler.vcxproj", "{D84E7B21-9A34-4F6C-B122-6D1C0E5A9401}"
+	ProjectSection(ProjectDependencies) = postProject
+		{718AA137-8391-4A35-AE13-A78746F5A5E8} = {718AA137-8391-4A35-AE13-A78746F5A5E8}
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Win32 = Debug|Win32
+		Release|Win32 = Release|Win32
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{718AA137-8391-4A35-AE13-A78746F5A5E8}.Debug|Win32.ActiveCfg = Debug|Win32
+		{718AA137-8391-4A35-AE13-A78746F5A5E8}.Debug|Win32.Build.0 = Debug|Win32
+		{718AA137-8391-4A35-AE13-A78746F5A5E8}.Release|Win32.ActiveCfg = Release|Win32
+		{718AA137-8391-4A35-AE13-A78746F5A5E8}.Release|Win32.Build.0 = Release|Win32
+		{D84E7B21-9A34-4F6C-B122-6D1C0E5A9401}.Debug|Win32.ActiveCfg = Debug|Win32
+		{D84E7B21-9A34-4F6C-B122-6D1C0E5A9401}.Debug|Win32.Build.0 = Debug|Win32
+		{D84E7B21-9A34-4F6C-B122-6D1C0E5A9401}.Release|Win32.ActiveCfg = Release|Win32
+		{D84E7B21-9A34-4F6C-B122-6D1C0E5A9401}.Release|Win32.Build.0 = Release|Win32
+	EndGlobalSection
+EndGlobal
