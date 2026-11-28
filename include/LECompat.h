@@ -24,17 +24,25 @@ namespace LE
 		// Confirmed static functions (TESV.exe 1.9.32.0)
 		inline constexpr std::uintptr_t kMenuManager_IsInMenuMode = 0x00918D90;
 		inline constexpr std::uintptr_t kUIManager_AddMessage = 0x00431B00;
-		inline constexpr std::uintptr_t kInputEventDispatcher_IsGamepadEnabled = 0x00A68E80;
+		inline constexpr std::uintptr_t kInputEventDispatcher_IsGamepadEnabled = 0x00A68EB0;
 		inline constexpr std::uintptr_t kPlayerControls_ReceiveMenuModeChange = 0x00772B10;
 		inline constexpr std::uintptr_t kPlayerControls_ReceiveMenuOpenClose = 0x00773340;
 		inline constexpr std::uintptr_t kActor_SetDialogueWithPlayer = 0x006C0D90; // Actor::Unk_41
 		inline constexpr std::uintptr_t kMenuTopicManager_StartDialogue = 0x006758A0;
 		inline constexpr std::uintptr_t kMenuTopicManager_GetActorInDialogue = 0x00674450;
+		inline constexpr std::uintptr_t kBSFixedString_Assign = 0x00A51280;
+		inline constexpr std::uintptr_t kLookupREFRByHandle = 0x004A9180;
+		inline constexpr std::uintptr_t kPlayerCharacter_InitDialogueLookAt = 0x0073C3D0;
+		inline constexpr std::uintptr_t kPlayerCharacter_GetDialogueLookAngle = 0x0073C730;
+		inline constexpr std::uintptr_t kHUDMenu_SetHUDMode = 0x0085FC80;
 
-		// PlayerCharacter dialogue camera block (noted in skyrim-classic-re MenuTopicManager.h:
-		// 0x0073C3DF and 0x0073C736 query MenuTopicManager::GetActorInDialogueWithPlayer and control camera)
-		inline constexpr std::uintptr_t kPlayerDialogueCamera_RangeStart = 0x0073C000;
-		inline constexpr std::uintptr_t kPlayerDialogueCamera_RangeEnd = 0x0073CC00;
+		// Verified 5-byte call rel32 hook sites (TESV.exe 1.9.32.0)
+		inline constexpr std::uintptr_t kCallSite_GetDialogueLookAngle = 0x00771E60;
+		inline constexpr std::uintptr_t kCallSite_StartDialogueForceGreet = 0x006C0F4E;
+		inline constexpr std::uintptr_t kCallSite_InitDialogueLookAt = 0x00675CF1;
+		inline constexpr std::uintptr_t kCallSite_IsGamepadEnabled = 0x00773378;
+		inline constexpr std::uintptr_t kCallSite_StealthMeter_PushStealthMode = 0x008615A3;
+		inline constexpr std::uintptr_t kCallSite_StealthMeter_PopStealthMode = 0x008615D2;
 	}
 
 	inline bool FixedStringEquals(const RE::BSFixedString& a_lhs, const RE::BSFixedString& a_rhs) noexcept
@@ -47,11 +55,118 @@ namespace LE
 		return _stricmp(l, r) == 0;
 	}
 
-	inline void CopyFixedString(RE::BSFixedString& a_dst, const RE::BSFixedString& a_src)
+	inline void CopyFixedString(RE::BSFixedString& a_dst, const RE::BSFixedString& a_src) noexcept
 	{
-		if (a_dst.c_str() != a_src.c_str()) {
-			a_dst.set(a_src.c_str());
+		using fn_t = RE::BSFixedString*(CLLE_THISCALL*)(RE::BSFixedString*, const RE::BSFixedString&);
+		reinterpret_cast<fn_t>(Addresses::kBSFixedString_Assign)(&a_dst, a_src);
+	}
+
+	inline void ClearFixedString(RE::BSFixedString& a_dst)
+	{
+		a_dst.set("");
+	}
+
+	// =========================================================================
+	// RAII NiPointer<RE::TESObjectREFR> for BSHandleRefObject (10-bit refcount)
+	// =========================================================================
+	class TESObjectREFRPtr
+	{
+	public:
+		TESObjectREFRPtr() noexcept = default;
+
+		explicit TESObjectREFRPtr(RE::TESObjectREFR* a_ptr) noexcept :
+			_ptr(a_ptr)
+		{
+			IncRef(_ptr);
 		}
+
+		TESObjectREFRPtr(const TESObjectREFRPtr& a_other) noexcept :
+			_ptr(a_other._ptr)
+		{
+			IncRef(_ptr);
+		}
+
+		TESObjectREFRPtr(TESObjectREFRPtr&& a_other) noexcept :
+			_ptr(a_other._ptr)
+		{
+			a_other._ptr = nullptr;
+		}
+
+		~TESObjectREFRPtr()
+		{
+			reset();
+		}
+
+		TESObjectREFRPtr& operator=(const TESObjectREFRPtr& a_other) noexcept
+		{
+			if (this != &a_other) {
+				reset(a_other._ptr);
+			}
+			return *this;
+		}
+
+		TESObjectREFRPtr& operator=(TESObjectREFRPtr&& a_other) noexcept
+		{
+			if (this != &a_other) {
+				reset();
+				_ptr = a_other._ptr;
+				a_other._ptr = nullptr;
+			}
+			return *this;
+		}
+
+		void reset(RE::TESObjectREFR* a_ptr = nullptr) noexcept
+		{
+			if (_ptr != a_ptr) {
+				RE::TESObjectREFR* old = _ptr;
+				_ptr = a_ptr;
+				IncRef(_ptr);
+				DecRef(old);
+			}
+		}
+
+		[[nodiscard]] RE::TESObjectREFR* get() const noexcept { return _ptr; }
+		[[nodiscard]] RE::TESObjectREFR* operator->() const noexcept { return _ptr; }
+		[[nodiscard]] RE::TESObjectREFR& operator*() const noexcept { return *_ptr; }
+		explicit operator bool() const noexcept { return _ptr != nullptr; }
+
+		[[nodiscard]] RE::TESObjectREFR** raw_slot() noexcept { return &_ptr; }
+
+	private:
+		static void IncRef(RE::TESObjectREFR* a_ptr) noexcept
+		{
+			if (a_ptr) {
+				InterlockedIncrement(reinterpret_cast<volatile LONG*>(
+					reinterpret_cast<std::byte*>(a_ptr) + 0x18));
+			}
+		}
+
+		static void DecRef(RE::TESObjectREFR* a_ptr) noexcept
+		{
+			if (a_ptr) {
+				auto* refCount = reinterpret_cast<volatile LONG*>(
+					reinterpret_cast<std::byte*>(a_ptr) + 0x18);
+				if ((InterlockedDecrement(refCount) & 0x3FFL) == 0) {
+					auto* handleRefObj = reinterpret_cast<void*>(
+						reinterpret_cast<std::byte*>(a_ptr) + 0x14);
+					auto** vtbl = *reinterpret_cast<void***>(handleRefObj);
+					using DeleteThis_t = void(CLLE_THISCALL*)(void*);
+					reinterpret_cast<DeleteThis_t>(vtbl[1])(handleRefObj);
+				}
+			}
+		}
+
+		RE::TESObjectREFR* _ptr{ nullptr };
+	};
+
+	inline bool LookupReferenceByHandle(RE::RefHandle a_handle, TESObjectREFRPtr& a_out) noexcept
+	{
+		a_out.reset();
+		if (a_handle == 0) {
+			return false;
+		}
+		using fn_t = bool(CLLE_CDECL*)(RE::RefHandle*, RE::TESObjectREFR**);
+		return reinterpret_cast<fn_t>(Addresses::kLookupREFRByHandle)(&a_handle, a_out.raw_slot());
 	}
 
 	inline bool IsInMenuMode() noexcept
@@ -122,20 +237,21 @@ namespace LE
 	CLLE_STATIC_ASSERT_OFFSET(ThumbstickEvent, keyMask, 0x14);
 
 	// =========================================================================
-	// MovementHandler (libSkyrim/PlayerInputHandler.h)
+	// MovementHandler (TESV.exe 0x0077402F..0x00774053: 8 bytes)
 	// =========================================================================
 	struct MovementHandler
 	{
-		void** vtable{};         // 00
-		std::uint32_t enabled{}; // 04 (PlayerInputHandler::enabled)
-		bool disabled{};         // 08 (MovementHandler::disabled)
-		std::uint8_t pad09[3]{};
+		void** vtable{};                  // 00
+		bool inputEventHandlingEnabled{}; // 04 (PlayerInputHandler::enabled)
+		std::uint8_t pad05[3]{};          // 05
 
 		[[nodiscard]] bool IsEnabled() const noexcept
 		{
-			return enabled != 0 && !disabled;
+			return inputEventHandlingEnabled;
 		}
 	};
+	CLLE_STATIC_ASSERT_SIZE(MovementHandler, 0x08);
+	CLLE_STATIC_ASSERT_OFFSET(MovementHandler, inputEventHandlingEnabled, 0x04);
 
 	// =========================================================================
 	// InputMappingManager / ControlMap helpers (libSkyrim/InputMappingManager.h)
@@ -159,7 +275,7 @@ namespace LE
 	CLLE_STATIC_ASSERT_SIZE(InputMappingContext, 0x24);
 
 	inline constexpr std::uint32_t kInvalidKey = 0xFFFFFFFFu;
-	inline constexpr std::int32_t kControlState_Movement = 0x401;
+	inline constexpr std::int32_t kControlState_Movement = 0x001;
 
 	inline bool IsMovementControlsEnabled(const RE::InputManager* a_inputMgr) noexcept
 	{
@@ -201,7 +317,11 @@ namespace LE
 
 		for (std::uint32_t i = 0; i < maps->count; ++i) {
 			if (FixedStringEquals(maps->data[i].name, a_controlName)) {
-				return static_cast<std::uint32_t>(maps->data[i].buttonID);
+				const std::uint32_t btn = static_cast<std::uint32_t>(maps->data[i].buttonID);
+				if (btn == 0xFFFFu || (a_deviceType != InputEvent::kDevice_Gamepad && btn == 0xFFu)) {
+					return kInvalidKey;
+				}
+				return btn;
 			}
 		}
 

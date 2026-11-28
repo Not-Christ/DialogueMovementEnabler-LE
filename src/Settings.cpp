@@ -84,14 +84,20 @@ namespace
 		return true;
 	}
 
-	bool GetIniBool(const IniData& a_ini, const char* a_section, const char* a_key, bool a_default)
+	bool GetIniBool(const IniData& a_ini, const char* a_section, const char* a_key, bool a_default, bool* a_missingAny = nullptr)
 	{
 		const auto secIt = a_ini.find(ToLower(a_section));
 		if (secIt == a_ini.end()) {
+			if (a_missingAny) {
+				*a_missingAny = true;
+			}
 			return a_default;
 		}
 		const auto keyIt = secIt->second.find(ToLower(a_key));
 		if (keyIt == secIt->second.end() || keyIt->second.empty()) {
+			if (a_missingAny) {
+				*a_missingAny = true;
+			}
 			return a_default;
 		}
 
@@ -105,14 +111,20 @@ namespace
 		return a_default;
 	}
 
-	float GetIniFloat(const IniData& a_ini, const char* a_section, const char* a_key, float a_default)
+	float GetIniFloat(const IniData& a_ini, const char* a_section, const char* a_key, float a_default, bool* a_missingAny = nullptr)
 	{
 		const auto secIt = a_ini.find(ToLower(a_section));
 		if (secIt == a_ini.end()) {
+			if (a_missingAny) {
+				*a_missingAny = true;
+			}
 			return a_default;
 		}
 		const auto keyIt = secIt->second.find(ToLower(a_key));
 		if (keyIt == secIt->second.end() || keyIt->second.empty()) {
+			if (a_missingAny) {
+				*a_missingAny = true;
+			}
 			return a_default;
 		}
 
@@ -183,48 +195,49 @@ namespace DME
 
 		IniData ini;
 		const bool existed = ReadIniFile(INI_PATH, ini);
+		bool missingAny = false;
 
 		SKSE::log::Write("Loading settings from %s (exists=%u)", INI_PATH, existed ? 1u : 0u);
 
 		// [GENERAL]
-		s->unlockCamera = GetIniBool(ini, "GENERAL", "bUnlockCamera", UNLOCK_CAMERA_DEFAULT_VALUE);
-		s->freeLook = GetIniBool(ini, "GENERAL", "bFreeLook", FREE_LOOK_DEFAULT_VALUE);
-		s->disableTurnToSpeakerPlayerInitiated = GetIniBool(ini, "GENERAL", "bDisableTurnToSpeakerPlayerInitiated", DISABLE_TURN_TO_SPEAKER_PLAYER_INITIATED_DEFAULT_VALUE);
-		s->disableTurnToSpeakerNPCInitiated = GetIniBool(ini, "GENERAL", "bDisableTurnToSpeakerNPCInitiated", DISABLE_TURN_TO_SPEAKER_NPC_INITIATED_DEFAULT_VALUE);
-		s->hotReloadINI = GetIniBool(ini, "GENERAL", "bHotReloadINI", HOT_RELOAD_INI_DEFAULT_VALUE);
+		s->unlockCamera = GetIniBool(ini, "GENERAL", "bUnlockCamera", UNLOCK_CAMERA_DEFAULT_VALUE, &missingAny);
+		s->freeLook = GetIniBool(ini, "GENERAL", "bFreeLook", FREE_LOOK_DEFAULT_VALUE, &missingAny);
+		s->disableTurnToSpeakerPlayerInitiated = GetIniBool(ini, "GENERAL", "bDisableTurnToSpeakerPlayerInitiated", DISABLE_TURN_TO_SPEAKER_PLAYER_INITIATED_DEFAULT_VALUE, &missingAny);
+		s->disableTurnToSpeakerNPCInitiated = GetIniBool(ini, "GENERAL", "bDisableTurnToSpeakerNPCInitiated", DISABLE_TURN_TO_SPEAKER_NPC_INITIATED_DEFAULT_VALUE, &missingAny);
+		s->hotReloadINI = GetIniBool(ini, "GENERAL", "bHotReloadINI", HOT_RELOAD_INI_DEFAULT_VALUE, &missingAny);
 
 		// [CONTROLS_KEYBOARD]
-		s->allowMovement[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowMovement", ALLOW_MOVEMENT_KEYBOARD_DEFAULT_VALUE);
-		s->allowRun[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowRun", ALLOW_RUN_KEYBOARD_DEFAULT_VALUE);
-		s->allowToggleRun[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowToggleRun", ALLOW_TOGGLE_RUN_KEYBOARD_DEFAULT_VALUE);
-		s->allowJump[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowJump", ALLOW_JUMP_KEYBOARD_DEFAULT_VALUE);
-		s->allowSprint[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowSprint", ALLOW_SPRINT_KEYBOARD_DEFAULT_VALUE);
-		s->allowTogglePOV[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowTogglePOV", ALLOW_TOGGLE_POV_KEYBOARD_DEFAULT_VALUE);
-		s->allowSneak[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowSneak", ALLOW_SNEAK_KEYBOARD_DEFAULT_VALUE);
-		s->allowReadyWeapon[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowReadyWeapon", ALLOW_READY_WEAPON_KEYBOARD_DEFAULT_VALUE);
-		s->allowLeftAttack[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowLeftAttack", ALLOW_LEFT_ATTACK_KEYBOARD_DEFAULT_VALUE);
-		s->allowRightAttack[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowRightAttack", ALLOW_RIGHT_ATTACK_KEYBOARD_DEFAULT_VALUE);
-		s->allowHotkeys[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowHotkeys", ALLOW_HOTKEYS_KEYBOARD_DEFAULT_VALUE);
-		s->allowShout[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowShout", ALLOW_SHOUT_KEYBOARD_DEFAULT_VALUE);
+		s->allowMovement[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowMovement", ALLOW_MOVEMENT_KEYBOARD_DEFAULT_VALUE, &missingAny);
+		s->allowRun[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowRun", ALLOW_RUN_KEYBOARD_DEFAULT_VALUE, &missingAny);
+		s->allowToggleRun[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowToggleRun", ALLOW_TOGGLE_RUN_KEYBOARD_DEFAULT_VALUE, &missingAny);
+		s->allowJump[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowJump", ALLOW_JUMP_KEYBOARD_DEFAULT_VALUE, &missingAny);
+		s->allowSprint[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowSprint", ALLOW_SPRINT_KEYBOARD_DEFAULT_VALUE, &missingAny);
+		s->allowTogglePOV[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowTogglePOV", ALLOW_TOGGLE_POV_KEYBOARD_DEFAULT_VALUE, &missingAny);
+		s->allowSneak[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowSneak", ALLOW_SNEAK_KEYBOARD_DEFAULT_VALUE, &missingAny);
+		s->allowReadyWeapon[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowReadyWeapon", ALLOW_READY_WEAPON_KEYBOARD_DEFAULT_VALUE, &missingAny);
+		s->allowLeftAttack[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowLeftAttack", ALLOW_LEFT_ATTACK_KEYBOARD_DEFAULT_VALUE, &missingAny);
+		s->allowRightAttack[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowRightAttack", ALLOW_RIGHT_ATTACK_KEYBOARD_DEFAULT_VALUE, &missingAny);
+		s->allowHotkeys[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowHotkeys", ALLOW_HOTKEYS_KEYBOARD_DEFAULT_VALUE, &missingAny);
+		s->allowShout[ControlType::kKeyboardMouse] = GetIniBool(ini, "CONTROLS_KEYBOARD", "bAllowShout", ALLOW_SHOUT_KEYBOARD_DEFAULT_VALUE, &missingAny);
 
 		// [CONTROLS_CONTROLLER]
-		s->allowMovement[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowMovement", ALLOW_MOVEMENT_CONTROLLER_DEFAULT_VALUE);
-		s->allowRun[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowRun", ALLOW_RUN_CONTROLLER_DEFAULT_VALUE);
-		s->allowToggleRun[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowToggleRun", ALLOW_TOGGLE_RUN_CONTROLLER_DEFAULT_VALUE);
-		s->allowJump[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowJump", ALLOW_JUMP_CONTROLLER_DEFAULT_VALUE);
-		s->allowSprint[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowSprint", ALLOW_SPRINT_CONTROLLER_DEFAULT_VALUE);
-		s->allowTogglePOV[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowTogglePOV", ALLOW_TOGGLE_POV_CONTROLLER_DEFAULT_VALUE);
-		s->allowSneak[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowSneak", ALLOW_SNEAK_CONTROLLER_DEFAULT_VALUE);
-		s->allowReadyWeapon[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowReadyWeapon", ALLOW_READY_WEAPON_CONTROLLER_DEFAULT_VALUE);
-		s->allowLeftAttack[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowLeftAttack", ALLOW_LEFT_ATTACK_CONTROLLER_DEFAULT_VALUE);
-		s->allowRightAttack[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowRightAttack", ALLOW_RIGHT_ATTACK_CONTROLLER_DEFAULT_VALUE);
-		s->allowHotkeys[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowHotkeys", ALLOW_HOTKEYS_CONTROLLER_DEFAULT_VALUE);
-		s->allowShout[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowShout", ALLOW_SHOUT_CONTROLLER_DEFAULT_VALUE);
+		s->allowMovement[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowMovement", ALLOW_MOVEMENT_CONTROLLER_DEFAULT_VALUE, &missingAny);
+		s->allowRun[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowRun", ALLOW_RUN_CONTROLLER_DEFAULT_VALUE, &missingAny);
+		s->allowToggleRun[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowToggleRun", ALLOW_TOGGLE_RUN_CONTROLLER_DEFAULT_VALUE, &missingAny);
+		s->allowJump[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowJump", ALLOW_JUMP_CONTROLLER_DEFAULT_VALUE, &missingAny);
+		s->allowSprint[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowSprint", ALLOW_SPRINT_CONTROLLER_DEFAULT_VALUE, &missingAny);
+		s->allowTogglePOV[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowTogglePOV", ALLOW_TOGGLE_POV_CONTROLLER_DEFAULT_VALUE, &missingAny);
+		s->allowSneak[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowSneak", ALLOW_SNEAK_CONTROLLER_DEFAULT_VALUE, &missingAny);
+		s->allowReadyWeapon[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowReadyWeapon", ALLOW_READY_WEAPON_CONTROLLER_DEFAULT_VALUE, &missingAny);
+		s->allowLeftAttack[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowLeftAttack", ALLOW_LEFT_ATTACK_CONTROLLER_DEFAULT_VALUE, &missingAny);
+		s->allowRightAttack[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowRightAttack", ALLOW_RIGHT_ATTACK_CONTROLLER_DEFAULT_VALUE, &missingAny);
+		s->allowHotkeys[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowHotkeys", ALLOW_HOTKEYS_CONTROLLER_DEFAULT_VALUE, &missingAny);
+		s->allowShout[ControlType::kController] = GetIniBool(ini, "CONTROLS_CONTROLLER", "bAllowShout", ALLOW_SHOUT_CONTROLLER_DEFAULT_VALUE, &missingAny);
 
 		// [AUTOCLOSE]
-		s->autoCloseMenus = GetIniBool(ini, "AUTOCLOSE", "bAutoCloseMenus", AUTO_CLOSE_MENUS_DEFAULT_VALUE);
-		s->autoCloseDistance = GetIniFloat(ini, "AUTOCLOSE", "fAutoCloseDistance", AUTO_CLOSE_DISTANCE_DEFAULT_VALUE);
-		s->autoCloseTolerance = GetIniFloat(ini, "AUTOCLOSE", "fAutoCloseTolerance", AUTO_CLOSE_TOLERANCE_DEFAULT_VALUE);
+		s->autoCloseMenus = GetIniBool(ini, "AUTOCLOSE", "bAutoCloseMenus", AUTO_CLOSE_MENUS_DEFAULT_VALUE, &missingAny);
+		s->autoCloseDistance = GetIniFloat(ini, "AUTOCLOSE", "fAutoCloseDistance", AUTO_CLOSE_DISTANCE_DEFAULT_VALUE, &missingAny);
+		s->autoCloseTolerance = GetIniFloat(ini, "AUTOCLOSE", "fAutoCloseTolerance", AUTO_CLOSE_TOLERANCE_DEFAULT_VALUE, &missingAny);
 
 		// [HOOKS] (optional LE call-site overrides; 0 = auto-discover)
 		s->hookGetDialogueLookAngle = GetIniAddress(ini, "HOOKS", "uGetDialogueLookAngleCallSite", 0);
@@ -243,7 +256,37 @@ namespace DME
 			s->autoCloseDistance,
 			s->autoCloseTolerance);
 
-		if (a_saveBack && !existed) {
+		SKSE::log::Write(
+			"Controls[KB]: move=%u run=%u toggleRun=%u jump=%u sprint=%u pov=%u sneak=%u ready=%u L=%u R=%u hk=%u shout=%u",
+			s->allowMovement[ControlType::kKeyboardMouse] ? 1u : 0u,
+			s->allowRun[ControlType::kKeyboardMouse] ? 1u : 0u,
+			s->allowToggleRun[ControlType::kKeyboardMouse] ? 1u : 0u,
+			s->allowJump[ControlType::kKeyboardMouse] ? 1u : 0u,
+			s->allowSprint[ControlType::kKeyboardMouse] ? 1u : 0u,
+			s->allowTogglePOV[ControlType::kKeyboardMouse] ? 1u : 0u,
+			s->allowSneak[ControlType::kKeyboardMouse] ? 1u : 0u,
+			s->allowReadyWeapon[ControlType::kKeyboardMouse] ? 1u : 0u,
+			s->allowLeftAttack[ControlType::kKeyboardMouse] ? 1u : 0u,
+			s->allowRightAttack[ControlType::kKeyboardMouse] ? 1u : 0u,
+			s->allowHotkeys[ControlType::kKeyboardMouse] ? 1u : 0u,
+			s->allowShout[ControlType::kKeyboardMouse] ? 1u : 0u);
+
+		SKSE::log::Write(
+			"Controls[Pad]: move=%u run=%u toggleRun=%u jump=%u sprint=%u pov=%u sneak=%u ready=%u L=%u R=%u hk=%u shout=%u",
+			s->allowMovement[ControlType::kController] ? 1u : 0u,
+			s->allowRun[ControlType::kController] ? 1u : 0u,
+			s->allowToggleRun[ControlType::kController] ? 1u : 0u,
+			s->allowJump[ControlType::kController] ? 1u : 0u,
+			s->allowSprint[ControlType::kController] ? 1u : 0u,
+			s->allowTogglePOV[ControlType::kController] ? 1u : 0u,
+			s->allowSneak[ControlType::kController] ? 1u : 0u,
+			s->allowReadyWeapon[ControlType::kController] ? 1u : 0u,
+			s->allowLeftAttack[ControlType::kController] ? 1u : 0u,
+			s->allowRightAttack[ControlType::kController] ? 1u : 0u,
+			s->allowHotkeys[ControlType::kController] ? 1u : 0u,
+			s->allowShout[ControlType::kController] ? 1u : 0u);
+
+		if (a_saveBack && (!existed || missingAny)) {
 			SaveSettings();
 		} else {
 			UpdateCachedWriteTime();

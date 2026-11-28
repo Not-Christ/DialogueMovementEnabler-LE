@@ -19,7 +19,11 @@ namespace DME
 		using StartDialogue_t = bool(CLLE_THISCALL*)(LE::MenuTopicManager*, RE::TESObjectREFR*, bool, void*, bool);
 		StartDialogue_t _StartDialogue = nullptr;
 
+		using SetHUDMode_t = void(CLLE_CDECL*)(const char*, bool);
+		SetHUDMode_t _SetHUDMode = nullptr;
+
 		bool s_isNPCInitiatedDialogue = false;
+		bool s_deferredStealthHUDMode = false;
 
 		// =====================================================================
 		// Call-site hooks (x86 __fastcall with dummy EDX matches __thiscall ABI)
@@ -72,74 +76,50 @@ namespace DME
 			return _IsGamepadEnabled(a_inputDispatcher);
 		}
 
-		// =====================================================================
-		// Runtime rel32 CALL scanner helpers (validates live TESV.exe 1.9.32.0 bytes)
-		// =====================================================================
-		std::uintptr_t FindRelCallToExactTarget(
-			std::uintptr_t a_start,
-			std::size_t a_maxBytes,
-			std::uintptr_t a_expectedTarget) noexcept
+		void CLLE_CDECL StealthMeter_SetHUDMode_Hook(const char* a_mode, bool a_push)
 		{
-			std::vector<std::uint8_t> buf(a_maxBytes);
-			if (!REL::safe_read(a_start, buf.data(), a_maxBytes)) {
-				return 0;
+			RE::MenuManager* ui = RE::MenuManager::GetSingleton();
+			LE::UIStringHolder* uiStrings = LE::UIStringHolder::GetSingleton();
+			if (ui && uiStrings && ui->IsMenuOpen(uiStrings->dialogueMenu)) {
+				if (a_push) {
+					// Keep "DialogueMode" on top of HUDMenu's mode stack so crouching during dialogue
+					// doesn't re-enable the crosshair activate rollover ("[E] <Speaker>") over the speaker name.
+					s_deferredStealthHUDMode = true;
+					return;
+				}
+				if (s_deferredStealthHUDMode) {
+					s_deferredStealthHUDMode = false;
+					return;
+				}
 			}
 
-			for (std::size_t i = 0; i + 5 <= a_maxBytes; ++i) {
-				if (buf[i] != 0xE8) {
-					continue;
-				}
-				std::int32_t disp = 0;
-				std::memcpy(&disp, &buf[i + 1], sizeof(disp));
-				const std::uintptr_t site = a_start + i;
-				const std::uintptr_t target = static_cast<std::uintptr_t>(
-					static_cast<std::intptr_t>(site + 5) + static_cast<std::intptr_t>(disp));
-				if (target == a_expectedTarget) {
-					return site;
-				}
-			}
-			return 0;
+			_SetHUDMode(a_mode, a_push);
 		}
 
-		std::uintptr_t FindRelCallToRange(
-			std::uintptr_t a_start,
-			std::size_t a_maxBytes,
-			std::uintptr_t a_targetMin,
-			std::uintptr_t a_targetMax,
-			std::uintptr_t& a_outTarget) noexcept
-		{
-			a_outTarget = 0;
-			std::vector<std::uint8_t> buf(a_maxBytes);
-			if (!REL::safe_read(a_start, buf.data(), a_maxBytes)) {
-				return 0;
-			}
-
-			for (std::size_t i = 0; i + 5 <= a_maxBytes; ++i) {
-				if (buf[i] != 0xE8) {
-					continue;
-				}
-				std::int32_t disp = 0;
-				std::memcpy(&disp, &buf[i + 1], sizeof(disp));
-				const std::uintptr_t site = a_start + i;
-				const std::uintptr_t target = static_cast<std::uintptr_t>(
-					static_cast<std::intptr_t>(site + 5) + static_cast<std::intptr_t>(disp));
-				if (target >= a_targetMin && target <= a_targetMax) {
-					a_outTarget = target;
-					return site;
-				}
-			}
-			return 0;
-		}
-
-		bool PatchRelCall5(std::uintptr_t a_site, void* a_hook, std::uintptr_t& a_outOriginal) noexcept
+		// =====================================================================
+		// Call-site trampoline patch helper (validates live TESV.exe 1.9.32.0 bytes)
+		// =====================================================================
+		bool PatchVerifiedRelCall5(
+			std::uintptr_t a_site,
+			std::uintptr_t a_expectedTarget,
+			bool a_isOverride,
+			void* a_hook,
+			std::uintptr_t& a_outOriginal,
+			std::uintptr_t& a_outActualTarget) noexcept
 		{
 			a_outOriginal = 0;
+			a_outActualTarget = 0;
 			if (!a_site) {
 				return false;
 			}
 
 			const REL::DecodedTransfer decoded = REL::decode_transfer(a_site);
 			if (!decoded.valid || decoded.kind != REL::TransferKind::call_rel32) {
+				return false;
+			}
+
+			a_outActualTarget = decoded.target;
+			if (!a_isOverride && a_expectedTarget != 0 && decoded.target != a_expectedTarget) {
 				return false;
 			}
 
@@ -191,7 +171,8 @@ namespace DME
 				std::uint32_t a_context = RE::InputManager::kContextGameplay) noexcept
 			{
 				if (a_deviceType != LE::InputEvent::kDevice_Keyboard &&
-					a_deviceType != LE::InputEvent::kDevice_Mouse) {
+					a_deviceType != LE::InputEvent::kDevice_Mouse &&
+					a_deviceType != LE::InputEvent::kDevice_Gamepad) {
 					return false;
 				}
 
@@ -206,7 +187,6 @@ namespace DME
 				LE::UIStringHolder* uiStrings = LE::UIStringHolder::GetSingleton();
 				RE::PlayerControls* pc = RE::PlayerControls::GetSingleton();
 				RE::InputStringHolder* userEvents = RE::InputStringHolder::GetSingleton();
-				RE::InputEventDispatcher* inputDispatcher = RE::InputEventDispatcher::GetSingleton();
 				RE::InputManager* controlMap = RE::InputManager::GetSingleton();
 
 				const bool isInMenuMode = LE::IsInMenuMode();
@@ -217,13 +197,12 @@ namespace DME
 					movementControlsEnabled = moveHandler->IsEnabled() && LE::IsMovementControlsEnabled(controlMap);
 				}
 
+				std::vector<LE::InputEvent*> suppressedEvents;
+
 				if (a_event && *a_event && !this->remapMode && !isInMenuMode &&
-					ui && uiStrings && userEvents && inputDispatcher &&
+					ui && uiStrings && userEvents &&
 					ui->IsMenuOpen(uiStrings->dialogueMenu)) {
 					const Settings* settings = Settings::GetSingleton();
-					const Settings::ControlType controlType = inputDispatcher->IsGamepadEnabled()
-						? Settings::ControlType::kController
-						: Settings::ControlType::kKeyboardMouse;
 
 					const auto& strForward = LE::GetInputStringAt(userEvents, LE::InputStringOffset::kForward);
 					const auto& strBack = LE::GetInputStringAt(userEvents, LE::InputStringOffset::kBack);
@@ -249,6 +228,10 @@ namespace DME
 						}
 
 						auto* idEvent = static_cast<LE::IDEvent*>(evn);
+						const Settings::ControlType controlType =
+							(evn->deviceType == LE::InputEvent::kDevice_Gamepad)
+								? Settings::ControlType::kController
+								: Settings::ControlType::kKeyboardMouse;
 
 						// Controller left stick -> movement
 						if (settings->allowMovement[controlType] &&
@@ -264,7 +247,7 @@ namespace DME
 						const std::uint32_t keyMask = btn->keyMask;
 						const std::uint32_t devType = evn->deviceType;
 
-						// Movement (WASD)
+						// Movement (WASD / D-Pad or remapped movement keys)
 						if (settings->allowMovement[controlType]) {
 							if (IsMappedToSameButton(keyMask, devType, strForward)) {
 								LE::CopyFixedString(idEvent->controlID, strForward);
@@ -277,14 +260,16 @@ namespace DME
 							}
 						}
 
-						const auto remapIfAllowed = [&](bool a_setting, const RE::BSFixedString& a_targetEvent) {
+						const auto remapIfAllowed = [&](bool a_setting, const RE::BSFixedString& a_targetEvent) -> bool {
 							if (a_setting && IsMappedToSameButton(keyMask, devType, a_targetEvent)) {
 								if (movementControlsEnabled) {
 									LE::CopyFixedString(idEvent->controlID, a_targetEvent);
 								} else {
-									idEvent->controlID.set("");
+									LE::ClearFixedString(idEvent->controlID);
 								}
+								return true;
 							}
+							return false;
 						};
 
 						remapIfAllowed(settings->allowRun[controlType], strRun);
@@ -294,9 +279,21 @@ namespace DME
 						remapIfAllowed(settings->allowTogglePOV[controlType], strTogglePOV);
 						remapIfAllowed(settings->allowSneak[controlType], strSneak);
 						remapIfAllowed(settings->allowReadyWeapon[controlType], strReadyWeapon);
-						remapIfAllowed(settings->allowLeftAttack[controlType], strLeftAttack);
-						remapIfAllowed(settings->allowRightAttack[controlType], strRightAttack);
+						const bool matchedLeftAttack = remapIfAllowed(settings->allowLeftAttack[controlType], strLeftAttack);
+						const bool matchedRightAttack = remapIfAllowed(settings->allowRightAttack[controlType], strRightAttack);
 						remapIfAllowed(settings->allowShout[controlType], strShout);
+
+						// Prevent LMB/RMB (and attack-mapped buttons) from synthesizing Scaleform mouse clicks
+						// in MenuControls::ReceiveEvent (0x0087A508 / 0x0087A542) while still passing them to PlayerControls.
+						const bool suppressMouseButtons =
+							settings->allowLeftAttack[controlType] &&
+							settings->allowRightAttack[controlType] &&
+							devType == LE::InputEvent::kDevice_Mouse &&
+							(keyMask == 0u || keyMask == 1u);
+
+						if (matchedLeftAttack || matchedRightAttack || suppressMouseButtons) {
+							suppressedEvents.push_back(evn);
+						}
 
 						// Hotkeys 1..8
 						if (settings->allowHotkeys[controlType]) {
@@ -321,6 +318,39 @@ namespace DME
 					}
 				}
 
+				if (!suppressedEvents.empty() && a_event && *a_event) {
+					std::vector<std::pair<LE::InputEvent*, LE::InputEvent*>> savedChain;
+					LE::InputEvent* filteredHead = nullptr;
+					LE::InputEvent* filteredTail = nullptr;
+
+					for (LE::InputEvent* node = *a_event; node; node = node->next) {
+						savedChain.emplace_back(node, node->next);
+						const bool isSuppressed = std::find(
+							suppressedEvents.begin(),
+							suppressedEvents.end(),
+							node) != suppressedEvents.end();
+						if (!isSuppressed) {
+							if (!filteredHead) {
+								filteredHead = node;
+								filteredTail = node;
+							} else {
+								filteredTail->next = node;
+								filteredTail = node;
+							}
+						}
+					}
+					if (filteredTail) {
+						filteredTail->next = nullptr;
+					}
+
+					const std::uint32_t result = _ReceiveEvent(this, &filteredHead, a_source);
+
+					for (const auto& [node, origNext] : savedChain) {
+						node->next = origNext;
+					}
+					return result;
+				}
+
 				return _ReceiveEvent(this, a_event, a_source);
 			}
 		};
@@ -339,50 +369,74 @@ namespace DME
 
 			std::uint32_t ProcessMessage_Hook(LE::UIMessage* a_message)
 			{
-				if (a_message && a_message->type == LE::UIMessage::kShow) {
-					// Live-reload INI if user edited it or updated via SkyUI MCM
-					ReloadSettingsIfModified();
+				bool isHideMessage = false;
+				if (a_message) {
+					switch (a_message->type) {
+					case LE::UIMessage::kShow:
+					{
+						s_deferredStealthHUDMode = false;
 
-					// Disable cursor when in free look mode
-					if (Settings::GetSingleton()->freeLook) {
-						this->flags &= ~(
-							LE::IMenu::kUsesCursor |
-							LE::IMenu::kUpdateUsesCursor |
-							LE::IMenu::kDontHideCursorWhenTopmost);
-					}
+						// Live-reload INI if user edited it or updated via SkyUI MCM
+						ReloadSettingsIfModified();
 
-					RE::TESObjectREFR* target = nullptr;
-					if (LE::MenuTopicManager* topicManager = LE::MenuTopicManager::GetSingleton()) {
-						if (topicManager->speaker != 0) {
-							RE::LookupReferenceByHandle(topicManager->speaker, target);
+						// Disable cursor when in free look mode
+						if (Settings::GetSingleton()->freeLook) {
+							this->flags &= ~(
+								LE::IMenu::kUsesCursor |
+								LE::IMenu::kUpdateUsesCursor |
+								LE::IMenu::kDontHideCursorWhenTopmost);
 						}
-						if (!target && topicManager->lastSpeaker != 0) {
-							RE::LookupReferenceByHandle(topicManager->lastSpeaker, target);
+
+						LE::TESObjectREFRPtr target;
+						if (LE::MenuTopicManager* topicManager = LE::MenuTopicManager::GetSingleton()) {
+							if (topicManager->speaker != 0) {
+								LE::LookupReferenceByHandle(topicManager->speaker, target);
+							}
+							if (!target && topicManager->lastSpeaker != 0) {
+								LE::LookupReferenceByHandle(topicManager->lastSpeaker, target);
+							}
 						}
-					}
 
-					bool sameWorldSpace = false;
-					if (target) {
-						if (RE::PlayerCharacter* player = RE::PlayerCharacter::GetSingleton()) {
-							RE::TESObjectCELL* playerCell = player->parentCell;
-							RE::TESObjectCELL* targetCell = target->parentCell;
+						bool sameWorldSpace = false;
+						if (target) {
+							if (RE::PlayerCharacter* player = RE::PlayerCharacter::GetSingleton()) {
+								RE::TESObjectCELL* playerCell = player->parentCell;
+								RE::TESObjectCELL* targetCell = target->parentCell;
 
-							if (playerCell && targetCell) {
-								if (playerCell->IsInterior() && targetCell->IsInterior()) {
-									sameWorldSpace = (playerCell == targetCell);
-								} else if (!playerCell->IsInterior() && !targetCell->IsInterior()) {
-									RE::TESWorldSpace* playerWs = player->GetWorldspace();
-									RE::TESWorldSpace* targetWs = target->GetWorldspace();
-									sameWorldSpace = (playerWs && targetWs && playerWs == targetWs);
+								if (playerCell && targetCell) {
+									if (playerCell->IsInterior() && targetCell->IsInterior()) {
+										sameWorldSpace = (playerCell == targetCell);
+									} else if (!playerCell->IsInterior() && !targetCell->IsInterior()) {
+										RE::TESWorldSpace* playerWs = player->GetWorldspace();
+										RE::TESWorldSpace* targetWs = target->GetWorldspace();
+										sameWorldSpace = (playerWs && targetWs && playerWs == targetWs);
+									}
 								}
 							}
 						}
-					}
 
-					AutoCloseManager::GetSingleton()->InitAutoClose(sameWorldSpace ? target : nullptr);
+						AutoCloseManager::GetSingleton()->InitAutoClose(sameWorldSpace ? target.get() : nullptr);
+						break;
+					}
+					case LE::UIMessage::kHide:
+						isHideMessage = true;
+						AutoCloseManager::GetSingleton()->Reset();
+						break;
+					default:
+						break;
+					}
 				}
 
-				return _ProcessMessage(this, a_message);
+				const std::uint32_t result = _ProcessMessage(this, a_message);
+
+				if (isHideMessage && s_deferredStealthHUDMode) {
+					s_deferredStealthHUDMode = false;
+					if (_SetHUDMode) {
+						_SetHUDMode("StealthMode", true);
+					}
+				}
+
+				return result;
 			}
 
 			void NextFrame_Hook(float a_interval, std::uint32_t a_currentTime)
@@ -418,77 +472,154 @@ namespace DME
 
 		// 2. Call-site hook: PlayerControls::ReceiveEvent(MenuOpenCloseEvent*) -> IsGamepadEnabled (FreeLook)
 		{
-			const std::uintptr_t site = settings->hookIsGamepadEnabled
+			const bool isOverride = settings->hookIsGamepadEnabled != 0;
+			const std::uintptr_t site = isOverride
 				? settings->hookIsGamepadEnabled
-				: FindRelCallToExactTarget(
-					  LE::Addresses::kPlayerControls_ReceiveMenuOpenClose,
-					  0x120,
-					  LE::Addresses::kInputEventDispatcher_IsGamepadEnabled);
+				: LE::Addresses::kCallSite_IsGamepadEnabled;
 			std::uintptr_t orig = 0;
-			if (PatchRelCall5(site, reinterpret_cast<void*>(&PlayerControls_MenuOpenClose_IsGamepadEnabled_Hook), orig)) {
+			std::uintptr_t actualTarget = 0;
+			if (PatchVerifiedRelCall5(
+					site,
+					LE::Addresses::kInputEventDispatcher_IsGamepadEnabled,
+					isOverride,
+					reinterpret_cast<void*>(&PlayerControls_MenuOpenClose_IsGamepadEnabled_Hook),
+					orig,
+					actualTarget)) {
 				_IsGamepadEnabled = reinterpret_cast<IsGamepadEnabled_t>(orig);
 				SKSE::log::Write("[HOOK OK] PlayerControls::IsGamepadEnabled call site=0x%08X -> orig=0x%08X", static_cast<unsigned>(site), static_cast<unsigned>(orig));
 			} else {
-				SKSE::log::Write("[HOOK SKIP] PlayerControls::IsGamepadEnabled call site not found (FreeLook edge-turn bypass disabled; set [HOOKS] uIsGamepadEnabledCallSite to override).");
+				SKSE::log::Write(
+					"[HOOK FAIL] PlayerControls::IsGamepadEnabled call site=0x%08X (expected target=0x%08X, actual=0x%08X; set [HOOKS] uIsGamepadEnabledCallSite to override).",
+					static_cast<unsigned>(site),
+					static_cast<unsigned>(LE::Addresses::kInputEventDispatcher_IsGamepadEnabled),
+					static_cast<unsigned>(actualTarget));
 			}
 		}
 
 		// 3. Call-site hook: Actor::SetDialogueWithPlayer (ForceGreet) -> MenuTopicManager::StartDialogue
 		{
-			const std::uintptr_t site = settings->hookStartDialogueForceGreet
+			const bool isOverride = settings->hookStartDialogueForceGreet != 0;
+			const std::uintptr_t site = isOverride
 				? settings->hookStartDialogueForceGreet
-				: FindRelCallToExactTarget(
-					  LE::Addresses::kActor_SetDialogueWithPlayer,
-					  0x400,
-					  LE::Addresses::kMenuTopicManager_StartDialogue);
+				: LE::Addresses::kCallSite_StartDialogueForceGreet;
 			std::uintptr_t orig = 0;
-			if (PatchRelCall5(site, reinterpret_cast<void*>(&Actor_SetDialogueWithPlayer_ForceGreet_Hook), orig)) {
+			std::uintptr_t actualTarget = 0;
+			if (PatchVerifiedRelCall5(
+					site,
+					LE::Addresses::kMenuTopicManager_StartDialogue,
+					isOverride,
+					reinterpret_cast<void*>(&Actor_SetDialogueWithPlayer_ForceGreet_Hook),
+					orig,
+					actualTarget)) {
 				_StartDialogue = reinterpret_cast<StartDialogue_t>(orig);
 				SKSE::log::Write("[HOOK OK] Actor::SetDialogueWithPlayer ForceGreet call site=0x%08X -> orig=0x%08X", static_cast<unsigned>(site), static_cast<unsigned>(orig));
 			} else {
-				SKSE::log::Write("[HOOK SKIP] Actor::SetDialogueWithPlayer ForceGreet call site not found (set [HOOKS] uStartDialogueForceGreetCallSite to override).");
+				SKSE::log::Write(
+					"[HOOK FAIL] Actor::SetDialogueWithPlayer ForceGreet call site=0x%08X (expected target=0x%08X, actual=0x%08X; set [HOOKS] uStartDialogueForceGreetCallSite to override).",
+					static_cast<unsigned>(site),
+					static_cast<unsigned>(LE::Addresses::kMenuTopicManager_StartDialogue),
+					static_cast<unsigned>(actualTarget));
 			}
 		}
 
 		// 4. Call-site hook: MenuTopicManager::StartDialogue -> PlayerCharacter::InitDialogueLookAt
 		{
-			std::uintptr_t discoveredTarget = 0;
-			const std::uintptr_t site = settings->hookInitDialogueLookAt
+			const bool isOverride = settings->hookInitDialogueLookAt != 0;
+			const std::uintptr_t site = isOverride
 				? settings->hookInitDialogueLookAt
-				: FindRelCallToRange(
-					  LE::Addresses::kMenuTopicManager_StartDialogue,
-					  0x450,
-					  LE::Addresses::kPlayerDialogueCamera_RangeStart,
-					  LE::Addresses::kPlayerDialogueCamera_RangeEnd,
-					  discoveredTarget);
+				: LE::Addresses::kCallSite_InitDialogueLookAt;
 			std::uintptr_t orig = 0;
-			if (PatchRelCall5(site, reinterpret_cast<void*>(&InitDialogueLookAt_Hook), orig)) {
+			std::uintptr_t actualTarget = 0;
+			if (PatchVerifiedRelCall5(
+					site,
+					LE::Addresses::kPlayerCharacter_InitDialogueLookAt,
+					isOverride,
+					reinterpret_cast<void*>(&InitDialogueLookAt_Hook),
+					orig,
+					actualTarget)) {
 				_InitDialogueLookAt = reinterpret_cast<InitDialogueLookAt_t>(orig);
 				SKSE::log::Write("[HOOK OK] MenuTopicManager::InitDialogueLookAt call site=0x%08X -> orig=0x%08X", static_cast<unsigned>(site), static_cast<unsigned>(orig));
 			} else {
-				SKSE::log::Write("[HOOK SKIP] InitDialogueLookAt call site not found (TurnToSpeaker disable skipped; set [HOOKS] uInitDialogueLookAtCallSite to override).");
+				SKSE::log::Write(
+					"[HOOK FAIL] MenuTopicManager::InitDialogueLookAt call site=0x%08X (expected target=0x%08X, actual=0x%08X; set [HOOKS] uInitDialogueLookAtCallSite to override).",
+					static_cast<unsigned>(site),
+					static_cast<unsigned>(LE::Addresses::kPlayerCharacter_InitDialogueLookAt),
+					static_cast<unsigned>(actualTarget));
 			}
 		}
 
 		// 5. Call-site hook: PlayerControls -> PlayerCharacter::GetDialogueLookAngle (UnlockCamera)
 		{
-			std::uintptr_t discoveredTarget = 0;
-			const std::size_t scanSize = static_cast<std::size_t>(
-				LE::Addresses::kPlayerControls_ReceiveMenuOpenClose - LE::Addresses::kPlayerControls_ReceiveMenuModeChange);
-			const std::uintptr_t site = settings->hookGetDialogueLookAngle
+			const bool isOverride = settings->hookGetDialogueLookAngle != 0;
+			const std::uintptr_t site = isOverride
 				? settings->hookGetDialogueLookAngle
-				: FindRelCallToRange(
-					  LE::Addresses::kPlayerControls_ReceiveMenuModeChange,
-					  scanSize,
-					  LE::Addresses::kPlayerDialogueCamera_RangeStart,
-					  LE::Addresses::kPlayerDialogueCamera_RangeEnd,
-					  discoveredTarget);
+				: LE::Addresses::kCallSite_GetDialogueLookAngle;
 			std::uintptr_t orig = 0;
-			if (PatchRelCall5(site, reinterpret_cast<void*>(&GetDialogueLookAngle_Hook), orig)) {
+			std::uintptr_t actualTarget = 0;
+			if (PatchVerifiedRelCall5(
+					site,
+					LE::Addresses::kPlayerCharacter_GetDialogueLookAngle,
+					isOverride,
+					reinterpret_cast<void*>(&GetDialogueLookAngle_Hook),
+					orig,
+					actualTarget)) {
 				_GetDialogueLookAngle = reinterpret_cast<GetDialogueLookAngle_t>(orig);
 				SKSE::log::Write("[HOOK OK] PlayerControls::GetDialogueLookAngle call site=0x%08X -> orig=0x%08X", static_cast<unsigned>(site), static_cast<unsigned>(orig));
 			} else {
-				SKSE::log::Write("[HOOK SKIP] GetDialogueLookAngle call site not found (UnlockCamera skipped; set [HOOKS] uGetDialogueLookAngleCallSite to override).");
+				SKSE::log::Write(
+					"[HOOK FAIL] PlayerControls::GetDialogueLookAngle call site=0x%08X (expected target=0x%08X, actual=0x%08X; set [HOOKS] uGetDialogueLookAngleCallSite to override).",
+					static_cast<unsigned>(site),
+					static_cast<unsigned>(LE::Addresses::kPlayerCharacter_GetDialogueLookAngle),
+					static_cast<unsigned>(actualTarget));
+			}
+		}
+		// 6. Call-site hooks: StealthMeter -> HUDMenu::SetHUDMode("StealthMode", true/false)
+		// Prevents crouching during dialogue from overriding "DialogueMode" and showing duplicate speaker/crosshair rollover text.
+		{
+			std::uintptr_t orig = 0;
+			std::uintptr_t actualTarget = 0;
+			if (PatchVerifiedRelCall5(
+					LE::Addresses::kCallSite_StealthMeter_PushStealthMode,
+					LE::Addresses::kHUDMenu_SetHUDMode,
+					false,
+					reinterpret_cast<void*>(&StealthMeter_SetHUDMode_Hook),
+					orig,
+					actualTarget)) {
+				_SetHUDMode = reinterpret_cast<SetHUDMode_t>(orig);
+				SKSE::log::Write(
+					"[HOOK OK] StealthMeter::SetHUDMode(push) call site=0x%08X -> orig=0x%08X",
+					static_cast<unsigned>(LE::Addresses::kCallSite_StealthMeter_PushStealthMode),
+					static_cast<unsigned>(orig));
+			} else {
+				SKSE::log::Write(
+					"[HOOK FAIL] StealthMeter::SetHUDMode(push) call site=0x%08X (expected target=0x%08X, actual=0x%08X)",
+					static_cast<unsigned>(LE::Addresses::kCallSite_StealthMeter_PushStealthMode),
+					static_cast<unsigned>(LE::Addresses::kHUDMenu_SetHUDMode),
+					static_cast<unsigned>(actualTarget));
+			}
+
+			orig = 0;
+			actualTarget = 0;
+			if (PatchVerifiedRelCall5(
+					LE::Addresses::kCallSite_StealthMeter_PopStealthMode,
+					LE::Addresses::kHUDMenu_SetHUDMode,
+					false,
+					reinterpret_cast<void*>(&StealthMeter_SetHUDMode_Hook),
+					orig,
+					actualTarget)) {
+				if (!_SetHUDMode) {
+					_SetHUDMode = reinterpret_cast<SetHUDMode_t>(orig);
+				}
+				SKSE::log::Write(
+					"[HOOK OK] StealthMeter::SetHUDMode(pop) call site=0x%08X -> orig=0x%08X",
+					static_cast<unsigned>(LE::Addresses::kCallSite_StealthMeter_PopStealthMode),
+					static_cast<unsigned>(orig));
+			} else {
+				SKSE::log::Write(
+					"[HOOK FAIL] StealthMeter::SetHUDMode(pop) call site=0x%08X (expected target=0x%08X, actual=0x%08X)",
+					static_cast<unsigned>(LE::Addresses::kCallSite_StealthMeter_PopStealthMode),
+					static_cast<unsigned>(LE::Addresses::kHUDMenu_SetHUDMode),
+					static_cast<unsigned>(actualTarget));
 			}
 		}
 	}

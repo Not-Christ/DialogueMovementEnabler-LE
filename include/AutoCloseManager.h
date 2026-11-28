@@ -11,6 +11,7 @@ namespace DME
 	public:
 		void CheckAutoClose();
 		void InitAutoClose(RE::TESObjectREFR* a_ref);
+		void Reset();
 
 		static AutoCloseManager* GetSingleton();
 
